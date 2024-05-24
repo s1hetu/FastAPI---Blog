@@ -1,0 +1,5 @@
+.env
+.venv11/
+migrations/versions/*
+.idea
+**/__pycache__/
