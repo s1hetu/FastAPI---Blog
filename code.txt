@@ -1,0 +1,122 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun May 26 13:23:41 2024
+
+@author: Administrator
+"""
+
+import requests
+from bs4 import BeautifulSoup
+import re
+import csv
+
+
+def get_old_files(filing_metadata):
+    old_filings = filing_metadata['filings']['files']
+    old_ulrs = []
+    for i in range(len(old_filings)):
+        old_ulrs.append(f"{old_filings[i]['name']}".replace(".json", "").replace("CIK", ""))
+    responses = []
+    for i in old_ulrs:
+        url1_data = get_filing_metadata(i)
+        responses.append(url1_data)
+    return responses
+
+
+def get_filing_metadata(cik):
+    headers = {'User-Agent': "getbagsfinance@gmail.com"}
+    response = requests.get(f'https://data.sec.gov/submissions/CIK{cik}.json', headers=headers)
+    print(f"Fetched data from https://data.sec.gov/submissions/CIK{cik}.json")
+    return response.json()
+
+
+def get_10k_urls(filing_metadata):
+    urls = []
+    try:
+        recent_filings = filing_metadata['filings']['recent']
+
+        for idx1 in range(len(recent_filings['form'])):
+            if recent_filings['form'][idx1] == '10-K':
+                filing_date = recent_filings['filingDate'][idx1]
+                filing_year = int(filing_date[:4])
+                if 2000 <= filing_year <= 2023:
+                    filing_url = f"https://www.sec.gov/Archives/edgar/data/{filing_metadata['cik']}/{recent_filings['accessionNumber'][idx1].replace('-', '')}/{recent_filings['primaryDocument'][idx1]}"
+                    urls.append((filing_url, filing_date[:4]))  # Append URL and year
+
+        old_findings = get_old_files(filing_metadata)
+
+        for each_old_finding in old_findings:
+            for idx2 in range(len(each_old_finding['form'])):
+                if each_old_finding['form'][idx2] == '10-K':
+                    filing_date = each_old_finding['filingDate'][idx2]
+                    filing_year = int(filing_date[:4])
+                    if 2000 <= filing_year <= 2023:
+                        filing_url = f"https://www.sec.gov/Archives/edgar/data/{filing_metadata['cik']}/{each_old_finding['accessionNumber'][idx2].replace('-', '')}/{each_old_finding['primaryDocument'][idx2]}"
+                        urls.append((filing_url, filing_date[:4]))  # Append URL and year
+    except KeyError as e:
+        print(f"KeyError: {e}")
+    return urls
+
+
+def download_10k_document(filing_url):
+    headers = {'User-Agent': "getbagsfinance@gmail.com"}
+    response = requests.get(filing_url, headers=headers)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    return soup.get_text()
+
+
+def search_words_in_10k(document_text, search_words):
+    occurrences = {}
+    for word in search_words:
+        matches = re.findall(word, document_text, re.IGNORECASE)
+        occurrences[word] = len(matches)
+    return occurrences
+
+
+if __name__ == "__main__":
+    # List of CIKs for the companies you want to process
+    ciks = ['0000789019']  # Example CIKs for Apple, IBM, and Microsoft
+
+    # Prepare a list to store the results
+    results = []
+
+    # Words to search for
+    search_words = ["AI ", "artificial intelligence"]  # Example words to search for
+
+    # Add column names to the results list
+    header_row = ["CIK", "Year"] + search_words
+
+    for cik in ciks:
+        # Step 1: Get filing metadata
+        filing_metadata = get_filing_metadata(cik)
+
+        # Step 2: Get 10-K filing URLs from 2000 to 2023
+        filing_urls = get_10k_urls(filing_metadata)
+
+        # Step 3: Loop through each 10-K filing URL and search for the words
+        for filing_url, year in filing_urls:
+            # Download 10-K document
+            document_text = download_10k_document(filing_url)
+
+            # Search for specific words in the 10-K document
+            word_occurrences = search_words_in_10k(document_text, search_words)
+
+            # Print the results to the console
+            print(f"CIK: {cik}, Year: {year}")
+            for word, count in word_occurrences.items():
+                print(f"Word: {word}, Occurrences: {count}")
+
+            # Store the results with the CIK number and year
+            row = [cik, year]
+            for word in search_words:
+                row.append(word_occurrences.get(word, 0))  # Append occurrences or 0 if word not found
+            results.append(row)
+
+    # Write results to a CSV file
+    csv_file_path = r'C:\Users\Administrator\SEC API\Word count in fillings\10k_word_occurrences28.csv'
+    with open(csv_file_path, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(header_row)
+        writer.writerows(results)
+
+    print(f"Results have been written to {csv_file_path}.")
